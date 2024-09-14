@@ -1,0 +1,126 @@
+`bottleneck` is a tool that can be used as an initial step for debugging
+bottlenecks in your program.
+
+It summarizes runs of your script with the Python profiler and PyTorch's
+autograd profiler. Because your script will be profiled, please ensure that it
+exits in a finite amount of time.
+
+For more complicated uses of the profilers, please see
+https://docs.python.org/3/library/profile.html and
+https://pytorch.org/docs/master/autograd.html#profiler for more information.
+Running environment analysis...
+Running your script with cProfile
+Running your script with the autograd profiler...
+--------------------------------------------------------------------------------
+  Environment Summary
+--------------------------------------------------------------------------------
+PyTorch 2.1.0 DEBUG compiled w/ CUDA 11.8
+Running with Python 3.10 and 
+
+`pip3 list` truncated output:
+numpy==1.26.0
+torch==2.1.0
+torchaudio==2.1.0
+torchelastic==0.2.2
+torchvision==0.16.0
+triton==2.1.0
+--------------------------------------------------------------------------------
+  cProfile output
+--------------------------------------------------------------------------------
+         2374497 function calls (2323046 primitive calls) in 4.147 seconds
+
+   Ordered by: internal time
+   List reduced from 6625 to 15 due to restriction <15>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+      202    0.241    0.001    0.241    0.001 {built-in method torch.conv2d}
+     1253    0.153    0.000    0.153    0.000 {method 'to' of 'torch._C._TensorBase' objects}
+      216    0.142    0.001    0.230    0.001 /root/IART/archs/psrt_sliding_arch.py:96(forward)
+   2685/1    0.139    0.000    4.165    4.165 {built-in method builtins.exec}
+     1348    0.130    0.000    0.130    0.000 {built-in method marshal.loads}
+      147    0.124    0.001    0.124    0.001 /opt/conda/lib/python3.10/site-packages/timm/models/efficientnet.py:1233(_cfg)
+  137/135    0.115    0.001    0.122    0.001 {built-in method _imp.create_dynamic}
+     2907    0.102    0.000    0.108    0.000 <frozen importlib._bootstrap>:179(_get_module_lock)
+3275/3202    0.101    0.000    0.304    0.000 {built-in method builtins.__build_class__}
+    597/2    0.075    0.000    0.405    0.203 /opt/conda/lib/python3.10/site-packages/torch/_dynamo/allowed_functions.py:186(_find_torch_objects)
+     1134    0.075    0.000    0.075    0.000 {method 'uniform_' of 'torch._C._TensorBase' objects}
+       72    0.064    0.001    0.174    0.002 /root/IART/archs/psrt_sliding_arch.py:57(__init__)
+      918    0.059    0.000    0.059    0.000 {built-in method torch._C._nn.linear}
+289827/283970    0.057    0.000    0.072    0.000 {built-in method builtins.isinstance}
+     1568    0.052    0.000    0.052    0.000 {method 'contiguous' of 'torch._C._TensorBase' objects}
+
+
+--------------------------------------------------------------------------------
+  autograd profiler output (CPU mode)
+--------------------------------------------------------------------------------
+        top 15 events sorted by cpu_time_total
+
+-----------------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                   Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg    # of Calls  
+-----------------------  ------------  ------------  ------------  ------------  ------------  ------------  
+               aten::to         0.01%       2.000us        22.41%       3.649ms       3.649ms             1  
+         aten::_to_copy         0.05%       8.000us        22.40%       3.647ms       3.647ms             1  
+    aten::empty_strided        21.97%       3.576ms        21.97%       3.576ms       3.576ms             1  
+               aten::to         0.01%       2.000us        20.63%       3.359ms       3.359ms             1  
+         aten::_to_copy         0.33%      54.000us        20.62%       3.357ms       3.357ms             1  
+    aten::empty_strided         0.53%      87.000us        18.96%       3.087ms       3.087ms             1  
+             cudaMalloc        18.42%       2.998ms        18.42%       2.998ms       2.998ms             1  
+           aten::floor_        17.22%       2.803ms        17.25%       2.809ms       2.809ms             1  
+          aten::reshape         0.04%       7.000us        17.15%       2.792ms       2.792ms             1  
+            aten::clone         0.04%       6.000us        17.09%       2.783ms       2.783ms             1  
+            aten::copy_        16.97%       2.763ms        17.00%       2.768ms       2.768ms             1  
+         aten::uniform_         6.30%       1.025ms         6.30%       1.025ms       1.025ms             1  
+         aten::uniform_         6.06%     986.000us         6.06%     986.000us     986.000us             1  
+         aten::uniform_         6.05%     985.000us         6.05%     985.000us     985.000us             1  
+         aten::uniform_         6.01%     978.000us         6.01%     978.000us     978.000us             1  
+-----------------------  ------------  ------------  ------------  ------------  ------------  ------------  
+Self CPU time total: 16.280ms
+
+--------------------------------------------------------------------------------
+  autograd profiler output (CUDA mode)
+--------------------------------------------------------------------------------
+        top 15 events sorted by cpu_time_total
+
+	Because the autograd profiler uses the CUDA event API,
+	the CUDA time column reports approximately max(cuda_time, cpu_time).
+	Please ignore this output if your code does not use CUDA.
+
+--------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg    # of Calls  
+--------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+           aten::sub        11.69%       3.474ms        11.69%       3.474ms       3.474ms       3.481ms        14.67%       3.481ms       3.481ms             1  
+       aten::erfinv_        11.64%       3.457ms        11.64%       3.457ms       3.457ms       3.465ms        14.60%       3.465ms       3.465ms             1  
+        aten::detach        11.33%       3.365ms        11.34%       3.369ms       3.369ms       3.364ms        14.17%       3.375ms       3.375ms             1  
+         aten::stack        10.23%       3.040ms        10.45%       3.104ms       3.104ms      30.000us         0.13%       3.109ms       3.109ms             1  
+           aten::mul         9.99%       2.967ms        10.04%       2.982ms       2.982ms       2.926ms        12.33%       2.926ms       2.926ms             1  
+    aten::contiguous         0.03%      10.000us         9.95%       2.957ms       2.957ms      10.000us         0.04%       2.961ms       2.961ms             1  
+         aten::clone         0.08%      25.000us         9.92%       2.947ms       2.947ms      18.000us         0.08%       2.951ms       2.951ms             1  
+          aten::rand         0.09%      28.000us         9.87%       2.933ms       2.933ms       7.000us         0.03%       2.820ms       2.820ms             1  
+    aten::empty_like         0.04%      12.000us         9.78%       2.906ms       2.906ms      11.000us         0.05%       2.911ms       2.911ms             1  
+      aten::uniform_         9.73%       2.890ms         9.75%       2.897ms       2.897ms       2.811ms        11.84%       2.811ms       2.811ms             1  
+         aten::empty         9.74%       2.894ms         9.74%       2.894ms       2.894ms       2.900ms        12.22%       2.900ms       2.900ms             1  
+         aten::slice         9.55%       2.837ms         9.55%       2.837ms       2.837ms      14.000us         0.06%       2.841ms       2.841ms             1  
+          aten::mul_         8.56%       2.543ms         8.56%       2.543ms       2.543ms       2.551ms        10.75%       2.551ms       2.551ms             1  
+       aten::erfinv_         7.19%       2.136ms         7.19%       2.136ms       2.136ms       2.143ms         9.03%       2.143ms       2.143ms             1  
+          aten::mul_         0.09%      28.000us         4.69%       1.394ms       1.394ms       5.000us         0.02%     693.000us     693.000us             1  
+--------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+Self CPU time total: 29.706ms
+Self CUDA time total: 23.736ms
+
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                                   Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg       CPU Mem  Self CPU Mem      CUDA Mem  Self CUDA Mem    # of Calls  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                          ProfilerStep*         0.01%     283.000us        92.91%        2.313s     771.027ms       0.000us         0.00%     630.569ms     210.190ms           0 b           0 b           0 b           0 b             3  
+                                        model_inference        31.81%     791.984ms        92.90%        2.313s     770.932ms       0.000us         0.00%     630.569ms     210.190ms           0 b     -36.14 Kb           0 b    -111.95 Gb             3  
+                                           aten::linear         1.25%      31.205ms        10.87%     270.649ms      98.275us       0.000us         0.00%     158.203ms      57.445us           0 b           0 b       6.90 Gb           0 b          2754  
+                                            aten::addmm         5.38%     133.984ms         7.51%     187.003ms      67.902us     156.893ms        25.33%     158.203ms      57.445us           0 b           0 b       6.90 Gb       6.90 Gb          2754  
+                                  volta_sgemm_32x128_tn         0.00%       0.000us         0.00%       0.000us       0.000us     156.893ms        25.33%     156.893ms      56.969us           0 b           0 b           0 b           0 b          2754  
+                                              aten::add         3.35%      83.507ms         4.62%     115.034ms      27.311us     112.843ms        18.22%     113.903ms      27.042us           0 b           0 b      36.73 Gb      36.73 Gb          4212  
+void at::native::elementwise_kernel<128, 2, at::nati...         0.00%       0.000us         0.00%       0.000us       0.000us     103.154ms        16.65%     103.154ms      60.750us           0 b           0 b           0 b           0 b          1698  
+                                           aten::matmul         0.92%      22.877ms         4.84%     120.544ms      85.858us       0.000us         0.00%     101.420ms      72.236us           0 b           0 b      23.99 Gb           0 b          1404  
+                                              aten::bmm         1.71%      42.488ms         2.20%      54.787ms      39.022us     100.022ms        16.15%     100.439ms      71.538us           0 b           0 b      23.78 Gb      23.78 Gb          1404  
+                                         aten::_softmax         0.60%      14.997ms         0.85%      21.064ms      30.006us      63.590ms        10.27%      63.793ms      90.873us           0 b           0 b      22.79 Gb      22.79 Gb           702  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+Self CPU time total: 2.490s
+Self CUDA time total: 619.381ms
+
