@@ -22,7 +22,6 @@ class BasicLayer(nn.Module):
             x = blk(x)
         return x
 
-
 class RVTM(nn.Module): # Residue Video Transformer Module
 
     def __init__(self, dim, data_size, 
@@ -47,16 +46,12 @@ class VideoTransformerBackbone(nn.Module):
 
     def __init__(self,
                  dim, data_size, 
-                 vtb_pre_name, vtb_pre_args,
-                 vtb_epi_name, vtb_epi_args,
                  rvtm_pre_name, rvtm_pre_args,
                  vit_namex, vit_argx, vit_seqx,
                  rvtm_epi_name, rvtm_epi_args,
                  ):
 
         super(VideoTransformerBackbone, self).__init__()
-        self.convolver          = vtb_pre_name(**vtb_pre_args)
-        self.upsampler          = vtb_epi_name(**vtb_epi_args)
 
         # build RVTM blocks
         self.layers = nn.ModuleList([
@@ -85,8 +80,6 @@ class VideoTransformerBackbone(nn.Module):
 
         x_center = x[:, t // 2, :, :, :].contiguous()
 
-        x = self.convolver(x)
-
         # b, t, c, h, w -> b, t, h, w, c
         x = x.permute(0, 1, 3, 4, 2).contiguous()
 
@@ -96,6 +89,6 @@ class VideoTransformerBackbone(nn.Module):
         # b, t, h, w, c -> b, t, c, h, w
         x = x.permute(0, 1, 4, 2, 3).contiguous()
 
-        x = self.upsampler(x) + x_center
+        x = x + x_center
 
         return x

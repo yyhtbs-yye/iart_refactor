@@ -29,23 +29,23 @@ class Mlp(nn.Module):
     
 class SelfAttention3D(nn.Module):
 
-    def __init__(self, dim, window_size, num_heads, 
+    def __init__(self, dim, token_dim, num_heads, 
                  qkv_bias=True, qk_scale=None, 
                  attn_drop=0., fc_drop=0.):
 
         super().__init__()
         self.dim = dim
-        self.window_size = window_size  # Wh, Ww
+        self.token_dim = token_dim  # Wh, Ww
         self.num_heads = num_heads  
         head_dim = dim // num_heads  
         self.scale = qk_scale or head_dim**-0.5
 
         # define a parameter table of relative position bias
         self.rpt = nn.Parameter(
-            torch.zeros((2 * window_size[0] - 1) * (2 * window_size[1] - 1) * (2 * window_size[2] - 1),
+            torch.zeros((2 * token_dim[0] - 1) * (2 * token_dim[1] - 1) * (2 * token_dim[2] - 1),
                         num_heads))  # 2*Wh-1 * 2*Ww-1, nH
 
-        self.register_buffer("rpi", get_relative_position_index_3d(self.window_size))
+        self.register_buffer("rpi", get_relative_position_index_3d(self.token_dim))
 
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
         self.fc = nn.Linear(dim, dim)
