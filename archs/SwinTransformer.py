@@ -61,7 +61,7 @@ class SwinTransformerBlock(nn.Module):
         attn_windows = self.attn(x_windows, mask=self.attn_mask)
 
         # reshape attended, output shape = [nWin*b, wT, wH, wW, c]
-        attn_windows = attn_windows.view(-1, *(self.window_size + [ c ]))
+        attn_windows = attn_windows.view(-1, *self.window_size, c)
 
         # merge attended, output shape = [b, pT, pH, pW, c]
         x = window_reverse(attn_windows, self.window_size, b, pT, pH, pW) 

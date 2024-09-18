@@ -92,6 +92,6 @@ class VideoTransformerBackbone(nn.Module):
 
         # b, t, h, w, c -> b, t, c, h, w
 
-        x = x + x_center
+        x = x + x_center.unsqueeze(1)
 
         return x
