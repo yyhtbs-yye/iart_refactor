@@ -18,8 +18,13 @@ class BasicLayer(nn.Module):
         ])
 
     def forward(self, x):
+        x = x.permute(0, 1, 3, 4, 2).contiguous()
+
         for blk in self.blocks:
             x = blk(x)
+
+        x = x.permute(0, 1, 4, 2, 3).contiguous()
+
         return x
 
 class RVTM(nn.Module): # Residue Video Transformer Module
@@ -81,13 +86,11 @@ class VideoTransformerBackbone(nn.Module):
         x_center = x[:, t // 2, :, :, :].contiguous()
 
         # b, t, c, h, w -> b, t, h, w, c
-        x = x.permute(0, 1, 3, 4, 2).contiguous()
 
         for layer in self.layers:
             x = layer(x)
 
         # b, t, h, w, c -> b, t, c, h, w
-        x = x.permute(0, 1, 4, 2, 3).contiguous()
 
         x = x + x_center
 

@@ -12,7 +12,7 @@ class SwinTransformerBlock(nn.Module):
 
     def __init__(self, dim, data_size, vit_args):
         
-        super(SwinTransformerBlock).__init__()
+        super(SwinTransformerBlock, self).__init__()
 
         self.dim            = dim
         self.data_size      = data_size
