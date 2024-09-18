@@ -35,8 +35,8 @@ def test_video_transformer():
     batch_size = 2
     time_steps = 4
     channels = 8
-    height = 224
-    width = 224
+    height = 223
+    width = 222
     input_tensor = torch.randn(batch_size, time_steps, channels, height, width)
 
     # Define some placeholder arguments for the model (these need to be valid for your model)
@@ -48,8 +48,8 @@ def test_video_transformer():
     rvtm_pre_args = {'in_channels': channels, 'out_channels': dim, 'kernel_size': 3, 'padding': 1}
     
     vit_namex = [SwinTransformerBlock] * 2  # Dummy placeholder for Vit layers
-    vit_argx = [{'num_heads': 4, 'window_size': (2, 4, 4), 'shift_size': (1, 2, 2), 'mlp_ratio': 4, 'norm_layer': nn.LayerNorm, 
-                 'act_layer': nn.LeakyReLU, 
+    vit_argx = [{'num_heads': 4, 'window_size': (2, 8, 8), 'shift_size': (1, 2, 2), 'mlp_ratio': 4, 
+                 'norm_layer': nn.LayerNorm, 'act_layer': nn.LeakyReLU, 
                  'qkv_bias': True, 'qk_scale': None, 'attn_drop': 0.1, 'fc_drop': 0.1, 'mlp_drop': 0.1, 'drop_path': 0.1}] * 2
     vit_seqx = [[0], [1]]  # Sequence indices for layers
     
