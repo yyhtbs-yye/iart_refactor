@@ -1,28 +1,14 @@
 import math
 import torch
 import torch.nn as nn
+import einops
 
 class ImplicitWarpModule(nn.Module):
-    """ Implicit Warp Module.
-
-    Args:
-        dim (int): Number of input channels.
-        input_resolution (tuple[int]): Input resolution.
-        num_heads (int): Number of attention heads.
-        window_size (tuple[int]): Window size.
-        shift_size (tuple[int]): Shift size for mutual and self attention.
-        mut_attn (bool): If True, use mutual and self attention. Default: True.
-        mlp_ratio (float): Ratio of mlp hidden dim to embedding dim.
-        qkv_bias (bool, optional): If True, add a learnable bias to query, key, value. Default: True.
-        qk_scale (float | None, optional): Override default qk scale of head_dim ** -0.5 if set.
-        act_layer (nn.Module, optional): Activation layer. Default: nn.GELU.
-        norm_layer (nn.Module, optional): Normalization layer.  Default: nn.LayerNorm.
-        use_checkpoint_attn (bool): If True, use torch.checkpoint for attention modules. Default: False.
-        use_checkpoint_ffn (bool): If True, use torch.checkpoint for feed-forward modules. Default: False.
-    """
 
     def __init__(self,
-                 dim,
+                 dim, 
+                 image_size,
+                 window_size=2,
                  pe_wrp=True,
                  pe_x=True,
                  pe_dim = 48,
@@ -31,15 +17,15 @@ class ImplicitWarpModule(nn.Module):
                  num_heads=8,
                  aux_loss_out = False,
                  aux_loss_dim = 3,
-                 window_size=2,
                  qkv_bias=True,
                  qk_scale=None,
                  use_checkpoint_attn=False,
                  use_checkpoint_ffn=False,
                  ):
+        
         super().__init__()
         self.dim = dim
-        self.pe_wrp = pe_wrp
+        self.use_pe = pe_wrp
         self.pe_x = pe_x
         self.pe_dim = pe_dim
         self.pe_temp = pe_temp
@@ -51,6 +37,7 @@ class ImplicitWarpModule(nn.Module):
         self.scale = qk_scale or head_dim ** -0.5
 
         self.window_size = (window_size, window_size)
+        self.image_size = image_size
         self.warp_padding = warp_padding
         self.q = nn.Linear(pe_dim, dim, bias=qkv_bias)
         self.k = nn.Linear(pe_dim, dim, bias=qkv_bias)
@@ -60,135 +47,135 @@ class ImplicitWarpModule(nn.Module):
 
         self.softmax = nn.Softmax(dim=-1)
         
+        self.n_window_pixels = self.window_size[0] * self.window_size[1]
+
         self.register_buffer("position_bias", self.get_sine_position_encoding(self.window_size, pe_dim // 2, temperature=self.pe_temp, normalize=True))
 
-        grid_h, grid_w = torch.meshgrid(
-            torch.arange(0, self.window_size[0], dtype=int),
-            torch.arange(0, self.window_size[1], dtype=int)
-        )
 
-        self.num_values = self.window_size[0] * self.window_size[1]
+        self.register_buffer("window_idx_offset", torch.stack(torch.meshgrid(
+                                                                torch.arange(0, self.window_size[0], dtype=int),
+                                                                torch.arange(0, self.window_size[1], dtype=int)
+                                                                ), 2).reshape(self.n_window_pixels, 2))
 
-        self.register_buffer("window_idx_offset", torch.stack((grid_h, grid_w), 2).reshape(self.num_values, 2))
+        self.register_buffer("image_idx_offset", torch.stack(torch.meshgrid(
+                                                                torch.arange(0, self.image_size[0], dtype=int),
+                                                                torch.arange(0, self.image_size[1], dtype=int)
+                                                                ), 2))
 
-    def gather_hw(self, x, idx1, idx2):
+
+    def gather_hw(self, x, h_idx, w_idx):
         # Linearize the last two dims and index in a contiguous x
         x = x.contiguous()
-        lin_idx = idx2 + x.size(-1) * idx1                                  # Linear Index Calculation
+        lin_idx = w_idx + x.size(-1) * h_idx                                  # Linear Index Calculation
         x = x.view(-1, x.size(1), x.size(2) * x.size(3))                    # Reshape Tensor to B, T, H*W
         return x.gather(-1, lin_idx.unsqueeze(1).repeat(1,x.size(1),1))     # Gather on H*W dimension according to given [Hid, Wid]
 
 
-    def forward(self, y, x, flow):
-        # y: frame to be propagated.
-        # x: frame propagated to.
-        # flow: optical flow from x to y 
-        if x.size()[-2:] != flow.size()[1:3]:
-            raise ValueError(f'The spatial sizes of input ({x.size()[-2:]}) and '
-                            f'flow ({flow.size()[1:3]}) are not the same.')
-        n, c, h, w = x.size()
-
-        # create mesh grid
-        device = flow.device
-
-        # Creates a 2D mesh grid for the height (grid_h) and width (grid_w) dimensions. 
-        # This mesh grid is used to map the positions in the source image to the warped 
-        # positions in the reference image based on the optical flow.
-        grid_h, grid_w = torch.meshgrid(
-            torch.arange(0, h, device=device, dtype=x.dtype),
-            torch.arange(0, w, device=device, dtype=x.dtype)
-        )
-
-
-        # Combines (stack) grid_h and grid_w to form a grid of shape (h, w, 2) (where
-        # the last dimension stores both coordinates). The grid is then repeated for
-        # all elements in the batch. It is set to not require gradient computation
-        # (requires_grad=False).
-        grid = torch.stack((grid_h, grid_w), 2).repeat(n, 1, 1, 1)  # h, w, 2
-        grid.requires_grad = False
-
+    def forward(self, feat_supp, feat_curr, flow):
+        # feat_supp: frame to be propagated.
+        # feat_curr: frame propagated to.
+        # flow: optical flow from feat_curr to feat_supp 
+        n, c, h, w = feat_curr.size()
 
         # The flow field (flow) is flipped along its last dimension, then added to 
-        # the mesh grid. This creates the "warped grid" (grid_wrp), where each grid 
-        # location in x is displaced according to the flow.
-        grid_wrp = grid + flow.flip(dims=(-1,)) # grid_wrp
+        # the mesh grid_orig. This creates the "warped grid_orig" (grid_wrp_full), where each grid_orig 
+        # location in feat_curr is displaced according to the flow.
+        grid_wrp_full = self.image_idx_offset.unsqueeze(0) + flow.flip(dims=(-1,))
+
+        # The warped grid_orig grid_wrp_full is decomposed into two parts:
+        # grid_wrp_int: the integer part of the warped coordinates (by flooring).
+        # grid_wrp_dec: the fractional part, representing sub-pixel displacements.
+        grid_wrp_int = torch.floor(grid_wrp_full).int()
+        grid_wrp_dec = grid_wrp_full - grid_wrp_int
 
 
-        # The warped grid grid_wrp is decomposed into two parts:
-        # grid_wrp_flr: the integer part of the warped coordinates (by flooring).
-        # grid_wrp_off: the fractional part, representing sub-pixel displacements.
-        grid_wrp_flr = torch.floor(grid_wrp).int()
-        grid_wrp_off = grid_wrp - grid_wrp_flr
-
-
-        # Both grid_wrp_flr and grid_wrp_off are reshaped from (n, h, w, 2) to 
+        # Both grid_wrp_int and grid_wrp_dec are reshaped from (n, h, w, 2) to 
         # (n, h*w, 2) for easier processing in the next steps.
-        grid_wrp_flr = grid_wrp_flr.reshape(n, h*w, 2)
-        grid_wrp_off = grid_wrp_off.reshape(n, h*w, 2)
+        grid_wrp_int = grid_wrp_int.reshape(n, h*w, 2)
+        grid_wrp_dec = grid_wrp_dec.reshape(n, h*w, 2)
 
-        ## Get small 4x4 windows around the integer grid coordinates in the reference frame
-        grid_wrp = grid_wrp_flr.unsqueeze(2).repeat(1, 1, self.num_values, 1) + self.window_idx_offset 
-        grid_wrp = grid_wrp.reshape(n, h*w*self.num_values, 2)
+        ## Get small 4x4 windows around the integer grid_orig coordinates in the reference frame
+        # self.window_idx_offset.shape=(self.wh*ww, 2)
+        #     -> self.window_idx_offset.unsqueeze(0).unsqueeze(0).shape=(1, 1, wh*ww, 2)
+        # grid_wrp_int.shape=(n, h*w, 2) -> grid_wrp_int.unsqueeze(2).shape=(n, h*w, 1, 2)
+        grid_wrp_full = grid_wrp_int.unsqueeze(2) + self.window_idx_offset.unsqueeze(0).unsqueeze(0)
+        # grid_wrp_full.shape=(n, h*w, wh*ww, 2) -> (n, h*w*wh*ww, 2)
+        grid_wrp_full = grid_wrp_full.reshape(n, -1, 2)
+        # WARNING!!! grid_wrp_full is HUGE in memory!!!
 
+
+
+#*-----*# ---Integer Resampling--------------------------------------------------------------------
         # If the padding method is "duplicate", out-of-bound coordinates are clamped to 
         # the valid range (i.e., pixel indices are constrained to [0, h-1] for height 
         # and [0, w-1] for width).
         if self.warp_padding == 'duplicate':
-            idx0 = grid_wrp[:,:,0].clamp(min=0, max=h-1)
-            idx1 = grid_wrp[:,:,1].clamp(min=0, max=w-1)
+            h_idx = grid_wrp_full[:,:,0].clamp(min=0, max=h-1)
+            w_idx = grid_wrp_full[:,:,1].clamp(min=0, max=w-1)
             #---# The gathered values are then reshaped into the required format for further computation
-            wrp = self.gather_hw(y, idx0, idx1).reshape(n, c, h*w, self.num_values).permute(0,2,3,1).reshape(n, h*w*self.num_values, c)
+            feat_warp = einops.rearrange(
+                self.gather_hw(feat_supp, h_idx, w_idx),
+                'n c (h w) nwp -> n (h w nwp) c'
+            )
+
         # In this case, if "zero" padding is used, the code checks for out-of-bound pixel 
         # indices (invalid locations) and sets the corresponding gathered values to zero.
         elif self.warp_padding == 'zero':
-            invalid_h = torch.logical_or(grid_wrp[:,:,0]<0, grid_wrp[:,:,0]>h-1)
-            invalid_w = torch.logical_or(grid_wrp[:,:,1]<0, grid_wrp[:,:,1]>h-1)
+            invalid_h = torch.logical_or(grid_wrp_full[:,:,0]<0, grid_wrp_full[:,:,0]>h-1)
+            invalid_w = torch.logical_or(grid_wrp_full[:,:,1]<0, grid_wrp_full[:,:,1]>h-1)
             invalid = torch.logical_or(invalid_h, invalid_w)
 
-            idx0 = grid_wrp[:,:,0].clamp(min=0, max=h-1)
-            idx1 = grid_wrp[:,:,1].clamp(min=0, max=w-1)
+            h_idx = grid_wrp_full[:,:,0].clamp(min=0, max=h-1)
+            w_idx = grid_wrp_full[:,:,1].clamp(min=0, max=w-1)
 
-            wrp = self.gather_hw(y, idx0, idx1).reshape(n, c, h*w, self.num_values).permute(0,2,3,1).reshape(n, h*w*self.num_values, c)
-            wrp[invalid] = 0
+            feat_warp = einops.rearrange(
+                self.gather_hw(feat_supp, h_idx, w_idx),
+                'n c (h w) nwp -> n (h w nwp) c'
+            )
+
+            feat_warp[invalid] = 0
         else:
             raise ValueError(f'self.warp_padding: {self.warp_padding}')
         
+#*-----*# ---Decimal Resampling--------------------------------------------------------------------
         # Positional encoding (a bias term representing spatial positions, such as 
         # sine and cosine encoding) is repeated across all pixels to align with the 
-        # warped grid.
-        wrp_pe = self.position_bias.repeat(n, h*w, 1)
+        # warped grid_orig.
+        # self.position_bias.shape=(1, wH * wW, 2 * num_pos_feats)
+        # pe_warp.shape=(n, wH*wW*h*w, 2 * num_pos_feats)
+        pe_warp = self.position_bias.repeat(n, h * w, 1)
 
         # Adds positional encoding to the windowed patches, depending on whether 
-        # `self.pe_wrp` is set. The positional encoding may be used to improve 
+        # `self.use_pe` is set. The positional encoding may be used to improve 
         # spatial awareness in the cross-attention mechanism.
-        if self.pe_wrp:
-            wrp = wrp.repeat(1,1,self.pe_dim//c) + wrp_pe
+        if self.use_pe:
+            feat_warp = feat_warp.repeat(1, 1, self.pe_dim // c) + pe_warp
         else:
-            wrp = wrp.repeat(1,1,self.pe_dim//c)
+            feat_warp = feat_warp.repeat(1, 1, self.pe_dim // c)
 
-        # Flattens the tensor `x` and applies positional encoding (sine and cosine 
+        # Flattens the tensor `feat_curr` and applies positional encoding (sine and cosine 
         # encoding) to the source pixel based on the fractional offsets 
-        # `grid_wrp_off`.
+        # `grid_wrp_dec`.
 
-        x = x.flatten(2).permute(0,2,1)
-        x_pe = self.get_sine_position_encoding_points(grid_wrp_off, self.pe_dim // 2, temperature=self.pe_temp, normalize=True)
+        feat_curr = feat_curr.flatten(2).permute(0,2,1)
+        pe_curr = self.get_sine_position_encoding_points(grid_wrp_dec, self.pe_dim // 2, temperature=self.pe_temp, normalize=True)
 
-        # Adds the positional encoding to `x`, depending on whether `self.pe_x` is set.
+        # Adds the positional encoding to `feat_curr`, depending on whether `self.pe_x` is set.
         if self.pe_x:
-            x = x.repeat(1,1,self.pe_dim//c) + x_pe
+            feat_curr = feat_curr.repeat(1, 1, self.pe_dim // c) + pe_curr
         else:
-            x = x.repeat(1,1,self.pe_dim//c)
+            feat_curr = feat_curr.repeat(1, 1, self.pe_dim // c)
 
         # Computes the total number of pixels (flattened) across the batch.
-        nhw = n*h*w
+        nhw = n * h * w
         
         # Applies learnable linear transformations `self.k`, `self.v`, and `self.q` 
         # to generate the key, value, and query tensors used in the attention 
         # mechanism. The tensors are reshaped for multi-head attention.
 
-        kw = self.k(wrp).reshape(nhw, self.num_values, self.num_heads, self.dim // self.num_heads).permute(0, 2, 1, 3) 
-        vw = self.v(wrp).reshape(nhw, self.num_values, self.num_heads, self.dim // self.num_heads).permute(0, 2, 1, 3)
-        qx = self.q(x).reshape(nhw, self.num_heads, self.dim // self.num_heads).unsqueeze(1).permute(0, 2, 1, 3)
+        kw = self.k(feat_warp).reshape(nhw, self.n_window_pixels, self.num_heads, self.dim // self.num_heads).permute(0, 2, 1, 3) 
+        vw = self.v(feat_warp).reshape(nhw, self.n_window_pixels, self.num_heads, self.dim // self.num_heads).permute(0, 2, 1, 3)
+        qx = self.q(feat_curr).reshape(nhw, self.num_heads, self.dim // self.num_heads).unsqueeze(1).permute(0, 2, 1, 3)
 
         # The query (qx) is scaled and matrix-multiplied with the transposed key 
         # (kw) to compute attention weights, which are then normalized using 
@@ -251,7 +238,6 @@ class ImplicitWarpModule(nn.Module):
         return pos_embed.squeeze(0)
 
 
-
     def get_sine_position_encoding(self, HW, num_pos_feats=64, temperature=10000, normalize=True, scale=None):
         """ Get sine position encoding """
         if scale is not None and normalize is False:
@@ -260,24 +246,33 @@ class ImplicitWarpModule(nn.Module):
         if scale is None:
             scale = 2 * math.pi
 
+        # not_mask: (1, H, W)
         not_mask = torch.ones([1, HW[0], HW[1]])
+
+        
         y_embed = not_mask.cumsum(1, dtype=torch.float32) - 1
         x_embed = not_mask.cumsum(2, dtype=torch.float32) - 1
         if normalize:
             eps = 1e-6
             y_embed = y_embed / (y_embed[:, -1:, :] + eps) * scale
             x_embed = x_embed / (x_embed[:, :, -1:] + eps) * scale
+        
+        # x_embed,y_embed.shape=(1, H, W)
 
+        # dim_t.shape=(num_pos_feats,)
         dim_t = torch.arange(num_pos_feats, dtype=torch.float32)
         dim_t = temperature ** (2 * torch.div(dim_t, 2, rounding_mode='trunc') / num_pos_feats)
 
-        # BxCxHxW
+        # pos_x.shape=(1, H, W, num_pos_feats)
         pos_x = x_embed[:, :, :, None] / dim_t
         pos_y = y_embed[:, :, :, None] / dim_t
         pos_x = torch.stack((pos_x[:, :, :, 0::2].sin(), pos_x[:, :, :, 1::2].cos()), dim=4).flatten(3)
         pos_y = torch.stack((pos_y[:, :, :, 0::2].sin(), pos_y[:, :, :, 1::2].cos()), dim=4).flatten(3)
+
+        # (1, 2 * num_pos_feats, H, W)
         pos_embed = torch.cat((pos_y, pos_x), dim=3).permute(0, 3, 1, 2)
 
+        # (1, H * W, 2 * num_pos_feats)
         return pos_embed.flatten(2).permute(0, 2, 1).contiguous()
 
         
