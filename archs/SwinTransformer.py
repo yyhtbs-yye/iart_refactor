@@ -12,7 +12,7 @@ class SwinTransformerBlock(nn.Module):
 
     def __init__(self, dim, data_size, vit_args):
         
-        super(SwinTransformerBlock).__init__()
+        super(SwinTransformerBlock, self).__init__()
 
         self.dim            = dim
         self.data_size      = data_size
@@ -61,7 +61,7 @@ class SwinTransformerBlock(nn.Module):
         attn_windows = self.attn(x_windows, mask=self.attn_mask)
 
         # reshape attended, output shape = [nWin*b, wT, wH, wW, c]
-        attn_windows = attn_windows.view(-1, *(self.window_size + [ c ]))
+        attn_windows = attn_windows.view(-1, *self.window_size, c)
 
         # merge attended, output shape = [b, pT, pH, pW, c]
         x = window_reverse(attn_windows, self.window_size, b, pT, pH, pW) 

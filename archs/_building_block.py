@@ -66,7 +66,7 @@ class SelfAttention3D(nn.Module):
         q = q * self.scale
         attn = q @ k.transpose(-2, -1)
 
-        rpe = self.rpt[self.rpi[:N, :N].reshape(1)].reshape(N, N, -1)   # Wd*Wh*Ww,Wd*Wh*Ww,nH
+        rpe = self.rpt[self.rpi[:N, :N].reshape(-1)].reshape(N, N, -1)   # Wd*Wh*Ww,Wd*Wh*Ww,nH
         attn = attn + rpe.permute(2, 0, 1).contiguous().unsqueeze(0)    # B_, nH, N, N
 
         if mask is not None:
