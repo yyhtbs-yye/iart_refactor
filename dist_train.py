@@ -6,10 +6,9 @@ def setup_args():
     # Setup your command line arguments manually here
     sys.argv = [
         'recurrent_mix_precision_train.py',  # Simulate script name
-        '-opt', '/root/IART/options/IART_REDS_N6_300K.yml',       # Configuration file path
+        '-opt', '/root/IART/options/IARTv2_REDS_N6_300K.yml',       # Configuration file path
         '--launcher', 'none',             # Launcher type
         '--auto_resume',                     # Include this flag if you want auto-resume
-        # '--debug',                           # Include this flag to enable debug mode
         '--local_rank=0',                    # Local rank for distributed training
     ]
 
@@ -30,7 +29,7 @@ def main():
 
     # Main entry logic
     root_path = osp.abspath(osp.join(__file__, osp.pardir))
-    train_pipeline(root_path)
+    train_pipeline(str(root_path))
 
 if __name__ == "__main__":
     main()

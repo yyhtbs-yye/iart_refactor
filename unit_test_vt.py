@@ -3,8 +3,8 @@ import torch.nn as nn
 # from torchinfo import summary  # Optional for model summary, install via `pip install torchinfo`
 
 # Assuming the provided code is saved in a file named `video_transformer.py`
-from archs.VideoTransformer import VideoTransformerBackbone
-from archs.SwinTransformer import SwinTransformerBlock
+from archs.backbone_arch import VallinaBackbone
+from archs.swin_transformer import SwinTransformerBlock
 
 class Conv2dFor5D(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):

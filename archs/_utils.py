@@ -1,7 +1,22 @@
 import torch
 import numpy as np
 from functools import lru_cache
+import einops
 
+
+    # Linearize the last two dims and index in a contiguous x
+def gather_hw(x, h_idx, w_idx, B_, C_, H_, W_):
+
+    x = x.contiguous()
+
+    linear_idx = w_idx + W_ * h_idx + H_ * W_ * torch.arange(B_, dtype=h_idx.dtype, device=h_idx.device).view(-1, 1)
+    linear_idx = linear_idx.view(-1)
+
+    x = einops.rearrange(x, "b c h w -> c (b h w)")
+
+    y = x[:, linear_idx]
+
+    return einops.rearrange(y, "c (b hwuv) -> b hwuv c", b=B_, c=C_)
 def window_partition(x, window_size):
     """
     Args:
@@ -12,8 +27,7 @@ def window_partition(x, window_size):
         windows: (num_windows*b, window_size, window_size, c)
     """
     B, D, H, W, C = x.shape
-    x = x.view(B, D // window_size[0], window_size[0], H // window_size[1], window_size[1], W // window_size[2],
-               window_size[2], C)
+    x = x.view(B, D // window_size[0], window_size[0], H // window_size[1], window_size[1], W // window_size[2], window_size[2], C)
     windows = x.permute(0, 1, 3, 5, 2, 4, 6, 7).contiguous().view(-1, window_size[0] * window_size[1] * window_size[2],
                                                                   C)
     return windows
@@ -35,6 +49,7 @@ def window_reverse(windows, window_size, B, D, H, W):
     x = x.permute(0, 1, 4, 2, 5, 3, 6, 7).contiguous().view(B, D, H, W, -1)
     return x
 
+@lru_cache
 def compute_padding(window_size, t, h, w):
     pad_t0 = pad_h0 = pad_w0 = 0
     pad_t1 = (window_size[0] - t % window_size[0]) % window_size[0]

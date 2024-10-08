@@ -56,7 +56,7 @@ class SelfAttention3D(nn.Module):
         trunc_normal_(self.rpt, std=.02)
         self.softmax = nn.Softmax(dim=-1)
 
-    def forward(self, x, mask=None):
+    def forward(self, x, mask=None, nW=1):
         
         B_, N, D = x.shape
 
@@ -70,7 +70,6 @@ class SelfAttention3D(nn.Module):
         attn = attn + rpe.permute(2, 0, 1).contiguous().unsqueeze(0)    # B_, nH, N, N
 
         if mask is not None:
-            nW = mask.shape[0]
             attn = attn.view(B_ // nW, nW, self.num_heads, N, N) + mask.unsqueeze(1).unsqueeze(0)
             attn = attn.view(-1, self.num_heads, N, N)
             attn = self.softmax(attn)

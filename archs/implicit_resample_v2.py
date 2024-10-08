@@ -2,19 +2,7 @@ import math
 import torch
 import torch.nn as nn
 import einops
-
-def gather_hw(x, h_idx, w_idx, B_, C_, H_, W_):
-
-    x = x.contiguous()
-
-    linear_idx = w_idx + W_ * h_idx + H_ * W_ * torch.arange(B_, dtype=h_idx.dtype, device=h_idx.device).view(-1, 1)
-    linear_idx = linear_idx.view(-1)
-
-    x = einops.rearrange(x, "b c h w -> c (b h w)")
-
-    y = x[:, linear_idx]
-
-    return einops.rearrange(y, "c (b hwuv) -> b hwuv c", b=B_, c=C_)
+from _utils import gather_hw
 
 def get_sine_position_encoding(y_embed, x_embed, num_pos_feats=64, 
                                temperature=10000, use_norm=True, 
@@ -44,10 +32,10 @@ def get_sine_position_encoding(y_embed, x_embed, num_pos_feats=64,
 
         return pos_embed
 
-class ImplicitWarpModule(nn.Module):
+class ImplicitResampleModule(nn.Module):
 
     def __init__(self,
-                 dim, image_size, window_size=2,
+                 dim, image_size, window_size, target_size,
                  pe_wrp=True, pe_x=True,
                  pe_dim = 128, pe_temp = 10000,
                  warp_padding='duplicate',
@@ -72,6 +60,7 @@ class ImplicitWarpModule(nn.Module):
 
         self.window_size = (window_size, window_size)
         self.image_size = image_size
+        self.target_size = target_size
         self.warp_padding = warp_padding
         
         self.q = nn.Linear(pe_dim, dim, bias=qkv_bias)
@@ -105,52 +94,46 @@ class ImplicitWarpModule(nn.Module):
                                                              torch.arange(0, self.image_size[0], dtype=int),
                                                              torch.arange(0, self.image_size[1], dtype=int)), 2))
 
+        self.register_buffer("target_idx_offset", torch.stack(torch.meshgrid(
+                                                             torch.arange(0, self.target_size[0], dtype=int),
+                                                             torch.arange(0, self.target_size[1], dtype=int)), 2))
 
         self.initialize_weights()
 
     def initialize_weights(self):
-        # Xavier/Glorot initialization for q, k, v weights
-        nn.init.xavier_uniform_(self.q.weight)
-        nn.init.xavier_uniform_(self.k.weight)
-        nn.init.xavier_uniform_(self.v.weight)
-
-        # Optionally, initialize the bias terms with zero or small values
+        # Set weights and biases of self.q, self.k, self.v to 1
+        nn.init.constant_(self.q.weight, 1)
         if self.q.bias is not None:
-            nn.init.zeros_(self.q.bias)
+            nn.init.constant_(self.q.bias, 1)
+
+        nn.init.constant_(self.k.weight, 1)
         if self.k.bias is not None:
-            nn.init.zeros_(self.k.bias)
+            nn.init.constant_(self.k.bias, 1)
+
+        nn.init.constant_(self.v.weight, 1)
         if self.v.bias is not None:
-            nn.init.zeros_(self.v.bias)
+            nn.init.constant_(self.v.bias, 1)
 
-        # Initialize projection layer (for auxiliary output), if exists
         if self.aux_loss_out:
-            nn.init.xavier_uniform_(self.proj.weight)
+            nn.init.constant_(self.proj.weight, 1)
             if self.proj.bias is not None:
-                nn.init.zeros_(self.proj.bias)
+                nn.init.constant_(self.proj.bias, 1)
 
-    def forward(self, feat_supp, feat_curr, flow):
+
+    def forward(self, feat_supp, offset):
         # feat_supp: frame to be propagated.
-        # feat_curr: frame propagated to.
-        # flow: optical flow from feat_curr to feat_supp 
-        B_, C_, H_, W_ = feat_curr.size()
+        # offset: optical offset from feat_base to feat_supp 
+        B_, C_, H_, W_ = feat_supp.size()
         U_, V_ = self.window_size
         UV_ = U_ * V_
         HW_ = H_ * W_
         # Computes the total number of pixels (flattened) across the batch.
         BHW_ = B_ * H_ * W_
+        TH_, TW_ = self.target_size[0], self.target_size[1]
+        THW_ = TH_ * TW_
 
-        # Create the Image Index
-        image_idx_offset = torch.stack(torch.meshgrid(torch.arange(0, H_, dtype=int),
-                                                      torch.arange(0, W_, dtype=int)), 2).to(feat_supp.device)
+        grid_wrp_full = self.target_idx_offset.unsqueeze(0) + offset.flip(dims=(-1,))
 
-        # The flow field (flow) is flipped along its last dimension, then added to 
-        # the mesh `grid_orig`. This creates the "warped grid_orig" (grid_wrp_full), 
-        # where each `grid_orig` location in feat_curr is displaced according to the flow.
-        grid_wrp_full = image_idx_offset.unsqueeze(0) + flow.flip(dims=(-1,))
-
-        # The warped grid_orig grid_wrp_full is decomposed into two parts:
-        # grid_wrp_intg: the integer part of the warped coordinates (by flooring).
-        # grid_wrp_deci: the fractional part, representing sub-pixel displacements.
         grid_wrp_intg = torch.floor(grid_wrp_full).int()
         grid_wrp_deci = grid_wrp_full - grid_wrp_intg
 
@@ -182,18 +165,18 @@ class ImplicitWarpModule(nn.Module):
             feat_warp[invalid] = 0
         else:
             raise ValueError(f'self.warp_padding: {self.warp_padding}')
+        
 #*-----*# ---Decimal Resampling--------------------------------------------------------------------
 
         pe_warp = einops.rearrange(self.position_bias, "b (new uv) (c d) -> b new uv c d", c=C_, new=1)
-        feat_warp = einops.rearrange(feat_warp, "b (hw uv) (c new) -> b hw uv c new", uv=U_*V_, new=1) + pe_warp
+        feat_warp_ori = einops.rearrange(feat_warp, "b (hw uv) (c new) -> b hw uv c new", uv=U_*V_, new=1) 
+        feat_warp = feat_warp_ori + pe_warp
         feat_warp = einops.rearrange(feat_warp, "b hw uv c d -> b hw uv (c d)")
 
-        # pe_warp = self.position_bias.view(1, 1, UV_, C_, -1)
-        # feat_warp = feat_warp.view(B_, HW_, UV_, C_, 1) + pe_warp
-        # feat_warp = feat_warp.reshape(B_, HW_*UV_, -1)
-
-        # (b c h w) -> (b c hw) -> (b hw c)
-        feat_curr = feat_curr.flatten(2).permute(0, 2, 1)
+        # feat_base.shape=(B_, H_, W_, C_) -> (B_, HW_, C_)
+        feat_base = feat_warp.new_zeros([B_, self.target_size[0]*self.target_size[1], C_])
+        # Option 2: Use the mean of nearby pixels
+        feat_base = einops.reduce(feat_warp_ori.squeeze(-1), "b hw uv cd -> b hw cd", reduction='mean')
         
         pe_curr = get_sine_position_encoding(grid_wrp_deci[..., 0], 
                                              grid_wrp_deci[..., 1], 
@@ -201,16 +184,12 @@ class ImplicitWarpModule(nn.Module):
                                              use_norm=True, card=self.window_size)
 
         pe_curr = einops.rearrange(pe_curr, "b hw (c d) -> b hw c d", c=C_)
-        feat_curr = einops.rearrange(feat_curr, "b hw (c new) -> b hw c new", new=1) + pe_curr
-        feat_curr = einops.rearrange(feat_curr, "b hw c d -> b hw (c d)")
+        feat_base = einops.rearrange(feat_base, "b hw (c new) -> b hw c new", new=1) + pe_curr
+        feat_base = einops.rearrange(feat_base, "b hw c d -> b hw (c d)")
 
-        # pe_curr = pe_curr.view(B_, HW_, C_, -1)
-        # feat_curr = feat_curr.view(B_, HW_,  C_, 1) + pe_curr
-        # feat_curr = feat_curr.reshape(B_, HW_, -1)
-
-        kw = self.k(feat_warp).reshape(BHW_, UV_, self.num_heads, self.dim // self.num_heads).permute(0, 2, 1, 3) 
-        vw = self.v(feat_warp).reshape(BHW_, UV_, self.num_heads, self.dim // self.num_heads).permute(0, 2, 1, 3)
-        qx = self.q(feat_curr).reshape(BHW_, self.num_heads, self.dim // self.num_heads).unsqueeze(1).permute(0, 2, 1, 3)
+        kw = self.k(feat_warp).reshape(B_*THW_, UV_, self.num_heads, self.dim // self.num_heads).permute(0, 2, 1, 3) 
+        vw = self.v(feat_warp).reshape(B_*THW_, UV_, self.num_heads, self.dim // self.num_heads).permute(0, 2, 1, 3)
+        qx = self.q(feat_base).reshape(B_*THW_, self.num_heads, self.dim // self.num_heads).unsqueeze(1).permute(0, 2, 1, 3)
 
         # kw/vw.shape=(BHW_, n_heads, win, d)
         # qx.shape=(BHW_, n_heads, 1, d)
@@ -222,33 +201,35 @@ class ImplicitWarpModule(nn.Module):
         # (attn @ vw).shape=(BHW_, n_heads, 1, d)
         # (attn @ vw).transpose(1, 2).shape=(BHW_, 1, n_heads, d)
         # reshape -> out.shape=(BHW_, 1, n_heads*d)
-        out = (attn @ vw).transpose(1, 2).reshape(BHW_, 1, self.dim)
+        out = (attn @ vw).transpose(1, 2).reshape(B_*THW_, 1, self.dim)
         # squeeze() -> out.shape=(BHW_, n_heads*d)=(BHW_, n_heads*d)
         out = out.squeeze(1)
         
         # If auxiliary loss output is required, the output is projected back to
         if self.aux_loss_out:
-            out_rgb = self.proj(out).reshape(B_, H_, W_, C_).permute(0, 3, 1, 2)
-            return out.reshape(B_, H_, W_, self.dim).permute(0, 3, 1, 2), out_rgb
+            out_rgb = self.proj(out).reshape(B_, TH_, TW_, C_).permute(0, 3, 1, 2)
+            return out.reshape(B_, TH_, TW_, self.dim).permute(0, 3, 1, 2), out_rgb
         else:
-            return out.reshape(B_, H_, W_, self.dim).permute(0, 3, 1, 2)
+            return out.reshape(B_, TH_, TW_, self.dim).permute(0, 3, 1, 2)
 
 # Call the test function
 if __name__ == "__main__":
     # Define dimensions for the test
-    dim = 128  # Dimension of the features
-    image_size = (256, 256)  # Image size (height, width)
-    window_size = 4  # Window size for positional encoding
-    pe_dim = 256  # Positional encoding dimension
-    num_heads = 8  # Number of attention heads
-    aux_loss_out = False  # Whether to output auxiliary loss
-    aux_loss_dim = 3  # Dimension of auxiliary loss output
-    batch_size = 2  # Batch size for the test
+    dim = 128                   # Dimension of the features
+    image_size = (128, 128)     # Image size (height, width)
+    target_size = (256, 256)
+    window_size = 4             # Window size for positional encoding
+    pe_dim = 256                # Positional encoding dimension
+    num_heads = 8               # Number of attention heads
+    aux_loss_out = False        # Whether to output auxiliary loss
+    aux_loss_dim = 3            # Dimension of auxiliary loss output
+    batch_size = 2              # Batch size for the test
 
-    # Create the ImplicitWarpModule instance
-    model = ImplicitWarpModule(
+    # Create the ImplicitResampleModule instance
+    model = ImplicitResampleModule(
         dim=dim,
         image_size=image_size,
+        target_size=target_size,
         window_size=window_size,
         pe_dim=pe_dim,
         num_heads=num_heads,
@@ -261,15 +242,14 @@ if __name__ == "__main__":
 
     # Generate random input data
     feat_supp = torch.rand(batch_size, dim, image_size[0], image_size[1]).to('cuda:2')
-    feat_curr = torch.rand(batch_size, dim, image_size[0], image_size[1]).to('cuda:2')
-    flow = torch.rand(batch_size, image_size[0], image_size[1], 2).to('cuda:2')  # Flow with 2 channels (x and y displacement)
+    offset = torch.rand(batch_size, target_size[0], target_size[1], 2).to('cuda:2')  # Flow with 2 channels (x and y displacement)
 
     import time
     start_time = time.time()
 
     # Forward pass through the model
     for i in range(50):
-        output = model(feat_supp, feat_curr, flow)
+        output = model(feat_supp, offset)
     
     print("--- %s seconds ---" % (time.time() - start_time))
     # print("output", output)

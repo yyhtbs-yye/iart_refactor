@@ -50,15 +50,12 @@ datasets:
 network_g:
   type: IARTv2
   mid_channels: 32
-  embed_dim: 120
+  embed_dim: 64
   depths: [4, 4, 4]
-  num_heads: [6, 6, 6]
+  num_heads: [4, 4, 4]
   window_size: [3, 8, 8]
   num_frames: 3
-  img_size : 64
   patch_size : 1
-  cpu_cache_length: 100
-  is_low_res_input: True
   spynet_path: /root/IART/experiments/pretrained_models/flownet/spynet_sintel_final-3d2a1287.pth
 
 # path
@@ -95,7 +92,7 @@ train:
 
 # validation settings
 val:
-  val_freq: !!float 10
+  val_freq: !!float 10000
   save_img: false
 
   metrics:

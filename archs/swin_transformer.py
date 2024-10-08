@@ -33,21 +33,19 @@ class SwinTransformerBlock(nn.Module):
         self.mlp            = Mlp(in_features=dim, mid_features=dim * vit_args['mlp_ratio'], 
                                   act_layer=vit_args['act_layer'], drop=vit_args['mlp_drop'])
 
-        self.register_buffer("attn_mask", compute_mask(data_size,
-                                                       tuple(self.window_size),
-                                                       self.shift_size,))
-
-        self.padding        = compute_padding(self.window_size, *data_size)
-
     def forward(self, x):
         b, t, h, w, c = x.shape
+
+        padding   = compute_padding(self.window_size, t, h, w)
+
+        attn_mask = compute_mask((t, h, w), tuple(self.window_size), self.shift_size,).to(x.device)
 
         x_copy = x
 
         x = self.pre_norm(x)
 
         # pad feature maps to multiples of window size
-        x = F.pad(x, (0, 0, *self.padding))
+        x = F.pad(x, (0, 0, *padding))
 
         _, pT, pH, pW, _ = x.shape
 
@@ -58,7 +56,7 @@ class SwinTransformerBlock(nn.Module):
         # partition windows, output shape = [nWin*b, wT*wH*wW, c]
         x_windows = window_partition(x, self.window_size)  
 
-        attn_windows = self.attn(x_windows, mask=self.attn_mask)
+        attn_windows = self.attn(x_windows, mask=attn_mask, nW=x_windows.size(0)//x.size(0))
 
         # reshape attended, output shape = [nWin*b, wT, wH, wW, c]
         attn_windows = attn_windows.view(-1, *self.window_size, c)

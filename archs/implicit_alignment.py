@@ -71,6 +71,27 @@ class ImplicitWarpModule(nn.Module):
 
         self.register_buffer("window_idx_offset", torch.stack((grid_h, grid_w), 2).reshape(self.num_values, 2))
 
+        self.initialize_weights()
+
+    def initialize_weights(self):
+        # Set weights and biases of self.q, self.k, self.v to 1
+        nn.init.constant_(self.q.weight, 1)
+        if self.q.bias is not None:
+            nn.init.constant_(self.q.bias, 1)
+
+        nn.init.constant_(self.k.weight, 1)
+        if self.k.bias is not None:
+            nn.init.constant_(self.k.bias, 1)
+
+        nn.init.constant_(self.v.weight, 1)
+        if self.v.bias is not None:
+            nn.init.constant_(self.v.bias, 1)
+
+        if self.aux_loss_out:
+            nn.init.constant_(self.proj.weight, 1)
+            if self.proj.bias is not None:
+                nn.init.constant_(self.proj.bias, 1)
+
     def gather_hw(self, x, idx1, idx2):
         # Linearize the last two dims and index in a contiguous x
         x = x.contiguous()
@@ -250,8 +271,6 @@ class ImplicitWarpModule(nn.Module):
 
         return pos_embed.squeeze(0)
 
-
-
     def get_sine_position_encoding(self, HW, num_pos_feats=64, temperature=10000, normalize=True, scale=None):
         """ Get sine position encoding """
         if scale is not None and normalize is False:
@@ -280,4 +299,53 @@ class ImplicitWarpModule(nn.Module):
 
         return pos_embed.flatten(2).permute(0, 2, 1).contiguous()
 
-        
+
+# Call the test function
+if __name__ == "__main__":
+    # Define dimensions for the test
+    dim = 384  # Dimension of the features
+    image_size = (256, 256)  # Image size (height, width)
+    window_size = 4  # Window size for positional encoding
+    pe_dim = 256  # Positional encoding dimension
+    num_heads = 8  # Number of attention heads
+    aux_loss_out = False  # Whether to output auxiliary loss
+    aux_loss_dim = 3  # Dimension of auxiliary loss output
+    batch_size = 2  # Batch size for the test
+
+    # Create the ImplicitWarpModule instance
+    model = ImplicitWarpModule(
+        dim=dim,
+        window_size=window_size,
+        pe_dim=pe_dim,
+        num_heads=num_heads,
+        aux_loss_out=aux_loss_out,
+        aux_loss_dim=aux_loss_dim
+    ).to('cuda:3')
+
+    seed = 42
+    torch.manual_seed(seed)
+
+    # Generate random input data
+    feat_supp = torch.rand(batch_size, dim, image_size[0], image_size[1]).to('cuda:3')
+    feat_curr = torch.rand(batch_size, dim, image_size[0], image_size[1]).to('cuda:3')
+    flow = torch.rand(batch_size, image_size[0], image_size[1], 2).to('cuda:3')  # Flow with 2 channels (x and y displacement)
+
+    import time
+    start_time = time.time()
+
+    # Forward pass through the model
+    for i in range(50):
+        output = model(feat_supp, feat_curr, flow)
+    
+    print("--- %s seconds ---" % (time.time() - start_time))
+
+    print("output", output)
+
+    # Print the output shapes to verify the functionality
+    if aux_loss_out:
+        assert len(output) == 2
+        out_features, aux_out = output
+        print("Output shape:", out_features.shape)  # Expected: [batch_size, dim, H_, W_]
+        print("Auxiliary loss output shape:", aux_out.shape)  # Expected: [batch_size, aux_loss_dim, H_, W_]
+    else:
+        print("Output shape:", output.shape)  # Expected: [batch_size, dim, H_, W_]
