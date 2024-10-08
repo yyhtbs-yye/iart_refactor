@@ -17,13 +17,19 @@ class BRVRT(nn.Module):
     def __init__(self,
                  in_channels=3,
                  mid_channels=32,
-                 embed_dim=64,
-                 num_frames=3,
+                 embed_dim=64, 
                  img_size=64,
-                 patch_size=1,
                  num_stages=2,
                  spynet_path=None,
-                 backbone_def={},):
+                 preprocessor_name=None, 
+                 preprocessor_args=None,
+                 flow_warper_name=None, 
+                 flow_warper_args=None, 
+                 backbone_name=None, 
+                 backbone_args=None,
+                 construction_name=None, 
+                 construction_args=None,
+                 ):
 
         super().__init__()
         self.mid_channels = mid_channels
@@ -35,7 +41,6 @@ class BRVRT(nn.Module):
         if not isinstance(img_size, list):
             self.img_size = [img_size, img_size]
 
-        self.patch_size = patch_size
         # optical flow
         self.spynet = SpyNet(spynet_path)
         self.num_stages = num_stages

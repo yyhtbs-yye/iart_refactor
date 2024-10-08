@@ -29,15 +29,15 @@ class Mlp(nn.Module):
     
 class SelfAttention3D(nn.Module):
 
-    def __init__(self, dim, token_dim, num_heads, 
+    def __init__(self, embed_dim, token_dim, num_heads, 
                  qkv_bias=True, qk_scale=None, 
                  attn_drop=0., fc_drop=0.):
 
         super().__init__()
-        self.dim = dim
+        self.embed_dim = embed_dim
         self.token_dim = token_dim  # Wh, Ww
         self.num_heads = num_heads  
-        head_dim = dim // num_heads  
+        head_dim = embed_dim // num_heads  
         self.scale = qk_scale or head_dim**-0.5
 
         # define a parameter table of relative position bias
@@ -47,14 +47,14 @@ class SelfAttention3D(nn.Module):
 
         self.register_buffer("rpi", get_relative_position_index_3d(self.token_dim))
 
-        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
-        self.fc = nn.Linear(dim, dim)
+        self.qkv = nn.Linear(embed_dim, embed_dim * 3, bias=qkv_bias)
+        self.fc = nn.Linear(embed_dim, embed_dim)
 
         self.attn_drop = nn.Dropout(attn_drop)
         self.fc_drop = nn.Dropout(fc_drop)
 
         trunc_normal_(self.rpt, std=.02)
-        self.softmax = nn.Softmax(dim=-1)
+        self.softmax = nn.Softmax(embed_dim=-1)
 
     def forward(self, x, mask=None, nW=1):
         
