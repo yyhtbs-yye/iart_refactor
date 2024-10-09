@@ -7,13 +7,12 @@ from _default_essentials import Conv2dExt
 
 class SwinIR3d(nn.Module):
 
-    def __init__(self, model_args=None, 
+    def __init__(self, block_args=None, 
                  depths=(4, 4, 4)
                  ):
 
         super(SwinIR3d, self).__init__()
-        if model_args is None:
-            model_args = {
+        default_args = {
                 'embed_dim': 64,          # Dimension of the embedding
                 'input_size': (3, 64, 64),# Input size for the 3D data (depth, height, width)
                 'num_heads': 4,            # Number of attention heads in multi-head attention
@@ -29,24 +28,28 @@ class SwinIR3d(nn.Module):
                 'act_layer': nn.GELU,      # Activation function for the MLP layer (GELU in this case)
                 'mlp_drop': 0.1            # Dropout rate for the MLP
             }
+        if block_args is not None and isinstance(block_args, dict):
+            default_args.update(block_args)
+            block_args = default_args
+            
 
         self.swin_modules = nn.ModuleList()  # Ensure swin_blocks is a module list if these are modules
 
         for depth in depths:
             # Construct the blocks step by step for each depth
             swin_module = nn.Sequential(
-                Conv2dExt(in_channels=model_args['embed_dim'], 
-                        out_channels=model_args['embed_dim'], 
+                Conv2dExt(in_channels=block_args['embed_dim'], 
+                        out_channels=block_args['embed_dim'], 
                         kernel_size=3, padding=1),
                 
-                FlexibleHomoBlocks([SwinTransformerBlock], [model_args], [0] * depth, 
+                FlexibleHomoBlocks([SwinTransformerBlock], [block_args], [0] * depth, 
                                 prev_block_type='conv2d', 
                                 this_block_type='vit', 
                                 post_block_type='conv2d', 
                                 use_residue=False),
                 
-                Conv2dExt(in_channels=model_args['embed_dim'], 
-                        out_channels=model_args['embed_dim'], 
+                Conv2dExt(in_channels=block_args['embed_dim'], 
+                        out_channels=block_args['embed_dim'], 
                         kernel_size=3, padding=1)
             )
             

@@ -101,9 +101,9 @@ class ImplicitWarpModule(nn.Module):
                                                               torch.arange(0, self.window_size[0], dtype=int),
                                                               torch.arange(0, self.window_size[1], dtype=int)), 2))
 
-        self.register_buffer("image_idx_offset", torch.stack(torch.meshgrid(
-                                                             torch.arange(0, self.image_size[0], dtype=int),
-                                                             torch.arange(0, self.image_size[1], dtype=int)), 2))
+        # self.register_buffer("image_idx_offset", torch.stack(torch.meshgrid(
+        #                                                      torch.arange(0, self.image_size[0], dtype=int),
+        #                                                      torch.arange(0, self.image_size[1], dtype=int)), 2))
 
 
         self.initialize_weights()

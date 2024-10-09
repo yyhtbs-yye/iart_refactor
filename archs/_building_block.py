@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from timm.models.layers import trunc_normal_
-from ._positional_encoding import get_relative_position_index_3d
+from _positional_encoding import get_relative_position_index_3d
 
 class Mlp(nn.Module):
 
@@ -54,7 +54,7 @@ class SelfAttention3D(nn.Module):
         self.fc_drop = nn.Dropout(fc_drop)
 
         trunc_normal_(self.rpt, std=.02)
-        self.softmax = nn.Softmax(embed_dim=-1)
+        self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, x, mask=None, nW=1):
         

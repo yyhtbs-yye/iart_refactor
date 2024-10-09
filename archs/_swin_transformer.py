@@ -4,9 +4,9 @@ import torch.nn.functional as F
 from functools import lru_cache
 import math
 
-from ._utils import window_partition, window_reverse, compute_padding
-from ._building_block import SelfAttention3D, Mlp
-from ._dropout import DropPath
+from _utils import window_partition, window_reverse, compute_padding
+from _building_block import SelfAttention3D, Mlp
+from _dropout import DropPath
 
 class SwinTransformerBlock(nn.Module):
 
@@ -30,7 +30,7 @@ class SwinTransformerBlock(nn.Module):
 
         self.drop_path      = DropPath(args['drop_path']) if args['drop_path'] > 0. else nn.Identity()
 
-        self.mlp            = Mlp(in_features=args['embed_dim'], mid_features=args['embed_dim'] * args['mlp_ratio'], 
+        self.mlp            = Mlp(in_features=args['embed_dim'], mid_features=int(args['embed_dim'] * args['mlp_ratio']), 
                                   act_layer=args['act_layer'], drop=args['mlp_drop'])
 
     def forward(self, x):

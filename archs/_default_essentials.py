@@ -54,18 +54,21 @@ class SpatialPreprocessor2d(nn.Module):
         self.spatial_conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding)
 
     def forward(self, lqs):
+
+        b, t, c, h, w = lqs.shape
         
-        feats = self.spatial_conv(lqs)
+        feats = self.spatial_conv(lqs.view(-1, c, h, w)).view(b, t, -1, h, w)
 
         return feats
 
 class BidirectionFlowComputer(nn.Module):
 
     def __init__(self, spynet_path):
+        super(BidirectionFlowComputer, self).__init__()
 
         self.spynet = SpyNet(spynet_path)
 
-    def compute_flow(self, lqs):
+    def forward(self, lqs):
 
         n, t, c, h, w = lqs.size()
         lqs_1 = lqs[:, :-1, :, :, :].reshape(-1, c, h, w)

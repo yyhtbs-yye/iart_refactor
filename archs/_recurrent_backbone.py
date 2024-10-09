@@ -65,7 +65,7 @@ class TwoStageBiRecurrentBackbone(nn.Module):
 
         # Propagate features through stages
         for i in range(self.num_stages):
-            feats = self.propagate(feats, forward_flows, self.feature_extractor, is_reversed=False)
-            feats = self.propagate(feats, backward_flows, self.feature_extractor, is_reversed=True)
+            feats = self.propagate(feats, forward_flows, is_reversed=False)
+            feats = self.propagate(feats, backward_flows, is_reversed=True)
 
         return feats
