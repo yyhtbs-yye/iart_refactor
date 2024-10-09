@@ -24,7 +24,7 @@ class TwoStageBiRecurrentBackbone(nn.Module):
         out_feats = []
         prop_feat = torch.zeros_like(curr_feats[:, 0, ...])
 
-        feat_indices = list(range(t)) if not is_reversed else list(range(t - 1, -1, -1))
+        feat_indices = list(range(t)) if not is_reversed else list(range(-1, -t - 1, -1))
 
         for i in range(0, t):
             

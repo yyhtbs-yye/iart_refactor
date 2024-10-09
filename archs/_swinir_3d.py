@@ -1,3 +1,5 @@
+import torch
+
 import torch.nn as nn
 
 from _flexible_blocks import FlexibleHomoBlocks
@@ -62,4 +64,5 @@ class SwinIR3d(nn.Module):
         for swin_module in self.swin_modules:
             x = swin_module(x) + x
 
+        x = torch.sum(x, dim=1) # testing
         return x
